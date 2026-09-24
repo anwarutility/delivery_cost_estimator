@@ -3,6 +3,24 @@
 Module: `delivery_cost_estimator` — perbandingan biaya ongkir multi-kurir
 (Biteship) di dalam Delivery Tracking Dashboard (`stock_picking_delivery_tracking`).
 
+## v16.0.0.6 — 2026-09-24: Hotfix (Pilihan kurir & biaya tidak muncul di form)
+
+### Perbaikan
+- Setelah klik **"Hitung Estimasi Ongkir"** hasilnya tersimpan ke `stock.picking`
+  dan notifikasi sukses muncul, tetapi **daftar penawaran tidak tampil** di tab
+  "Delivery Cost" karena tombol hanya mengembalikan `display_notification` dan
+  form tidak di-reload (O2M tidak di-refresh). Sekarang:
+  - toast sukses dikirim via `bus.bus._sendone` (`simple_notification`), dan
+  - action mengembalikan `{'type': 'ir.actions.client', 'tag': 'reload'}`
+    sehingga form langsung menampilkan baris kurir/layanan/biaya & penanda
+    pilihan (juga berlaku untuk "Gunakan Kurir Ini").
+- `_get_active_couriers()` kini **dedupe tanpa urutan berubah** — daftar
+  `active_couriers` sebelumnya menyimpan duplikat (mis. `gojek,gojek,...`
+  karena Biteship mengembalikan satu baris per service). Parameter yang sudah
+  terlanjur berisi duplikat dibersihkan di instalasi ini.
+- Diverifikasi live di `agi` (DO 2975): aksi sukses, `reload` kembali, 2 baris
+  ter-tulis, `estimated_at` ter-update, pilihan ter-reset.
+
 ## v16.0.0.5 — 2026-09-24: Hotfix (Tombol "Ambil Daftar Kurir")
 
 ### Perbaikan

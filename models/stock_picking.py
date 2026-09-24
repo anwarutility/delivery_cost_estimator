@@ -3,6 +3,7 @@
 
 import logging
 from datetime import datetime
+from html import escape
 
 from odoo import _, fields, models
 from odoo.exceptions import UserError
@@ -237,11 +238,11 @@ class StockPicking(models.Model):
         if not client:
             return []
         couriers = client.get_couriers()
-        active = [
+        active = list(dict.fromkeys(
             courier.get('courier_code') or courier.get('code')
             for courier in couriers
             if courier.get('courier_code') or courier.get('code')
-        ]
+        ))
         config.set_param(DCE_ACTIVE_COURIERS, ','.join(active))
         config.set_param(DCE_COURIERS_UPDATED, datetime.now().isoformat())
         return active
@@ -413,15 +414,18 @@ class StockPicking(models.Model):
             'delivery_cost_estimated_at': fields.Datetime.now(),
             'selected_delivery_estimate_id': False,
         })
-        return {
-            'type': 'ir.actions.client',
-            'tag': 'display_notification',
-            'params': {
+        message = _('%d penawaran ongkir dari %d kurir berhasil dihitung.') % (
+            len(lines),
+            len({line['courier_code'] for line in lines if line['courier_code']}),
+        )
+        self.env['bus.bus']._sendone(
+            self.env.user.partner_id,
+            'simple_notification',
+            {
+                'title': 'Delivery Cost Estimator',
+                'message': escape(message),
                 'type': 'success',
-                'message': _('%d penawaran ongkir dari %d kurir berhasil dihitung.') % (
-                    len(lines),
-                    len({line['courier_code'] for line in lines if line['courier_code']}),
-                ),
                 'sticky': False,
             },
-        }
+        )
+        return {'type': 'ir.actions.client', 'tag': 'reload'}

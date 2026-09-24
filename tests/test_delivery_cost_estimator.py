@@ -416,7 +416,7 @@ class TestDeliveryCostActions(TransactionCase):
         self.assertEqual(len(picking.delivery_cost_estimate_ids), 2)
         self.assertTrue(picking.delivery_cost_estimated_at)
         self.assertFalse(picking.selected_delivery_estimate_id)
-        self.assertEqual(action["params"]["type"], "success")
+        self.assertEqual(action["tag"], "reload")
         # cheapest/fastest flags resolve on the saved lines
         picking.delivery_cost_estimate_ids.invalidate_recordset()
         cheapest = picking.delivery_cost_estimate_ids.filtered(
@@ -441,7 +441,7 @@ class TestDeliveryCostActions(TransactionCase):
             picking.selected_delivery_estimate_id.id, line.id
         )
         self.assertTrue(line.is_selected)
-        self.assertEqual(action["params"]["type"], "success")
+        self.assertEqual(action["tag"], "reload")
 
     def test_action_estimate_non_outgoing_error(self):
         picking = self.Picking.create(

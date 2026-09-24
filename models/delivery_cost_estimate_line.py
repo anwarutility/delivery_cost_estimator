@@ -2,6 +2,7 @@
 # License LGPL-3.0 or later (https://www.gnu.org/licenses/lgpl-3.0)
 
 import re
+from html import escape
 
 from odoo import _, api, fields, models
 
@@ -127,15 +128,18 @@ class DeliveryCostEstimateLine(models.Model):
         picking = self.picking_id
         picking.write({'selected_delivery_estimate_id': self.id})
         service = self.service_name or self.courier_code or self.courier_name
-        return {
-            'type': 'ir.actions.client',
-            'tag': 'display_notification',
-            'params': {
+        message = _('Kurir %s (%s) dipilih untuk pengiriman ini.') % (
+            self.courier_name or self.courier_code,
+            service,
+        )
+        picking.env['bus.bus']._sendone(
+            picking.env.user.partner_id,
+            'simple_notification',
+            {
+                'title': 'Delivery Cost Estimator',
+                'message': escape(message),
                 'type': 'success',
-                'message': _('Kurir %s (%s) dipilih untuk pengiriman ini.') % (
-                    self.courier_name or self.courier_code,
-                    service,
-                ),
                 'sticky': False,
             },
-        }
+        )
+        return {'type': 'ir.actions.client', 'tag': 'reload'}
