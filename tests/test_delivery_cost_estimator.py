@@ -8,6 +8,7 @@ All Biteship HTTP calls are mocked at the client-class level (``search_areas``,
 """
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from odoo.exceptions import UserError
@@ -195,13 +196,45 @@ class TestDeliveryCostEstimatorHelpers(TransactionCase):
         picking = self._make_picking()
         with patch(
             GET_COURIERS,
-            return_value=[{"code": "lion", "name": "Lion Parcel"}],
+            return_value=[
+                {"courier_code": "lion", "courier_name": "Lion Parcel"}
+            ],
         ) as m:
             result = picking._get_active_couriers()
         self.assertEqual(result, ["lion"])
         m.assert_called_once()
         self.assertEqual(self.Icp.get_param(ACTIVE_COURIERS), "lion")
         self.assertTrue(self.Icp.get_param(COURIERS_UPDATED))
+
+    def test_active_couriers_code_field_fallback(self):
+        """Legacy ``code`` field also accepted (defensive, not API's shape)."""
+        picking = self._make_picking()
+        with patch(
+            GET_COURIERS,
+            return_value=[{"code": "jne", "name": "JNE Express"}],
+        ) as m:
+            result = picking._get_active_couriers()
+        self.assertEqual(result, ["jne"])
+        m.assert_called_once()
+
+    def test_settings_refresh_couriers_fills_config(self):
+        """Settings button parses ``courier_code`` payload into the field."""
+        settings = self.env["res.config.settings"].create({})
+        fake = SimpleNamespace(
+            get_couriers=lambda: [
+                {"courier_code": "jne", "courier_name": "JNE Express"},
+                {"courier_code": "jnt", "courier_name": "J&T Express"},
+            ]
+        )
+        with patch(
+            "odoo.addons.delivery_cost_estimator.models.stock_picking."
+            "StockPicking._dce_client",
+            return_value=fake,
+        ) as m:
+            result = settings.action_dce_refresh_couriers()
+        m.assert_called_once()
+        self.assertEqual(settings.dce_active_couriers, "jne,jnt")
+        self.assertEqual(result["params"]["type"], "success")
 
 
 class TestDeliveryCostEstimateLines(TransactionCase):

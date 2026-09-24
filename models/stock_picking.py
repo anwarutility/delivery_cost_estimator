@@ -237,7 +237,11 @@ class StockPicking(models.Model):
         if not client:
             return []
         couriers = client.get_couriers()
-        active = [courier.get('code') for courier in couriers if courier.get('code')]
+        active = [
+            courier.get('courier_code') or courier.get('code')
+            for courier in couriers
+            if courier.get('courier_code') or courier.get('code')
+        ]
         config.set_param(DCE_ACTIVE_COURIERS, ','.join(active))
         config.set_param(DCE_COURIERS_UPDATED, datetime.now().isoformat())
         return active

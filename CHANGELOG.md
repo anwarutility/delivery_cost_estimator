@@ -3,6 +3,23 @@
 Module: `delivery_cost_estimator` — perbandingan biaya ongkir multi-kurir
 (Biteship) di dalam Delivery Tracking Dashboard (`stock_picking_delivery_tracking`).
 
+## v16.0.0.5 — 2026-09-24: Hotfix (Tombol "Ambil Daftar Kurir")
+
+### Perbaikan
+- Tombol **"Ambil Daftar Kurir"** di Settings selalu memunculkan
+  `Biteship tidak mengembalikan daftar kurir aktif` meskipun API key valid.
+  Penyebab: `GET /v1/couriers` mengembalikan field **`courier_code`**, bukan
+  `code` — pembacaan di `res.config.settings.action_dce_refresh_couriers()` dan
+  `stock.picking._get_active_couriers()` hanya membaca `code`, sehingga daftar
+  selalu kosong saat cache kedaluwarsa. (Di sandbox masalah tak terlihat karena
+  akun test memang mengembalikan `[]`.)
+- Sekarang membaca `courier_code` dengan fallback `code` (defensif) di kedua
+  jalur. Diverifikasi live di `agi` dengan key live: 22 kurir aktif terbaca.
+- Test baru: `test_settings_refresh_couriers_fills_config` (payload
+  `courier_code` → settings terisi) dan
+  `test_active_couriers_code_field_fallback`; fixture refetch diubah ke shape
+  API asli. Suite: **39 test lulus**.
+
 ## v16.0.0.4 — 2026-09-24: CP4 (Integrasi & Testing)
 
 ### Perbaikan / Penyempurnaan

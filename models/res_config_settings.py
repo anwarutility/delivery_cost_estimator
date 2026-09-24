@@ -55,9 +55,9 @@ class ResConfigSettings(models.TransientModel):
             )
         couriers = client.get_couriers()
         active = sorted({
-            courier.get('code')
+            courier.get('courier_code') or courier.get('code')
             for courier in couriers
-            if courier.get('code')
+            if courier.get('courier_code') or courier.get('code')
         })
         if not active:
             raise UserError(
