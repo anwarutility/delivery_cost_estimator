@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- =========================================================
+         FORM VIEW  (extends stock.view_picking_form)
+         "Delivery Cost" tab + "Hitung Estimasi Ongkir" button.
+         Follows the existing "Riwayat Tracking" notebook pattern.
+         ========================================================= -->
+    <record id="view_picking_form_delivery_cost_estimator" model="ir.ui.view">
+        <field name="name">stock.picking.form.delivery.cost.estimator</field>
+        <field name="model">stock.picking</field>
+        <field name="inherit_id" ref="stock.view_picking_form"/>
+        <field name="arch" type="xml">
+
+            <!-- "Hitung Estimasi Ongkir" header button -->
+            <xpath expr="/form/header/button[@name='action_check_delivery_status']" position="after">
+                <button name="action_estimate_delivery_cost" type="object"
+                        string="Hitung Estimasi Ongkir" class="oe_highlight"
+                        groups="stock.group_stock_user"
+                        attrs="{'invisible': [('picking_type_code', '!=', 'outgoing')]}"/>
+            </xpath>
+
+            <!-- New tab "Delivery Cost" -->
+            <xpath expr="//notebook" position="inside">
+                <page string="Delivery Cost" name="delivery_cost_estimation"
+                      attrs="{'invisible': [('picking_type_code', '!=', 'outgoing')]}">
+                    <div class="row mt8">
+                        <p>
+                            Tekan <b>Hitung Estimasi Ongkir</b> untuk membandingkan
+                            biaya kirim semua kurir aktif. Data tersimpan sampai
+                            tombol ditekan kembali.
+                        </p>
+                    </div>
+                    <group class="o_estimate_meta">
+                        <group>
+                            <field name="delivery_cost_estimated_at" readonly="1"/>
+                        </group>
+                    </group>
+                    <field name="delivery_cost_estimate_ids">
+                        <tree create="false" delete="false">
+                            <field name="is_selected" string="Pilihan" widget="boolean_favorite"/>
+                            <field name="courier_name" string="Kurir"/>
+                            <field name="service_name" string="Layanan"/>
+                            <field name="price" string="Estimasi Biaya"/>
+                            <field name="duration_text" string="Durasi"/>
+                            <field name="is_cheapest" invisible="1"/>
+                            <field name="is_fastest" invisible="1"/>
+                            <field name="flag_summary" string="Label"
+                                   decoration-success="is_cheapest"
+                                   decoration-info="is_fastest"/>
+                            <button name="action_use_delivery_estimate" type="object"
+                                    string="Gunakan Kurir Ini" class="btn-link"/>
+                        </tree>
+                    </field>
+                </page>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>

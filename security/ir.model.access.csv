@@ -1,0 +1,4 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_delivery_cost_estimate_line_read,delivery.cost.estimate.line.read,model_delivery_cost_estimate_line,base.group_user,1,0,0,0
+access_delivery_cost_estimate_line_stock_manager,delivery.cost.estimate.line.stock.manager,model_delivery_cost_estimate_line,stock.group_stock_manager,1,1,1,1
+access_delivery_cost_estimate_line_stock_user,delivery.cost.estimate.line.stock.user,model_delivery_cost_estimate_line,stock.group_stock_user,1,1,1,1

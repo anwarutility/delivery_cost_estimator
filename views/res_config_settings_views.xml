@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_delivery_cost_estimator" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.delivery.cost.estimator</field>
+        <field name="model">res.config.settings</field>
+        <field name="priority" eval="32"/>
+        <field name="inherit_id" ref="stock.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//h2[hasclass('mt32')][string()='Warehouse']" position="before">
+                <h2 class="mt32">Delivery Cost Estimator</h2>
+                <div class="row mt16 o_settings_container" name="delivery_cost_estimator_container">
+                    <div class="col-12 col-lg-6 o_setting_box" id="dce_origin">
+                        <div class="o_setting_right_pane">
+                            <label for="dce_origin_area_id"/>
+                            <div class="text-muted">
+                                Origin tunggal (1 gudang pusat) untuk v1. Kosongkan
+                                agar di-resolve otomatis dari alamat gudang/company
+                                saat estimasi pertama dihitung.
+                            </div>
+                            <div class="content-group" id="dce_origin_content">
+                                <div class="row mt16">
+                                    <label string="Origin Area ID" for="dce_origin_area_id" class="col-4"/>
+                                    <field name="dce_origin_area_id" class="col-6"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-lg-6 o_setting_box" id="dce_couriers">
+                        <div class="o_setting_right_pane">
+                            <label for="dce_active_couriers"/>
+                            <div class="text-muted">
+                                Kurir yang dibandingkan di tab "Delivery Cost".
+                                Diambil sekali per TTL (bukan tiap klik).
+                            </div>
+                            <div class="content-group" id="dce_couriers_content">
+                                <div class="row mt16">
+                                    <label string="Kode Kurir (koma)" for="dce_active_couriers" class="col-4"/>
+                                    <field name="dce_active_couriers" class="col-6"
+                                           placeholder="jne,jnt,sicepat,lion,pos"/>
+                                </div>
+                                <div class="row mt8">
+                                    <div class="col-4 offset-2">
+                                        <button name="action_dce_refresh_couriers"
+                                                type="object"
+                                                string="Ambil Daftar Kurir" class="btn-secondary"/>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-lg-6 o_setting_box" id="dce_dims">
+                        <div class="o_setting_right_pane">
+                            <label for="dce_default_item_dimensions"/>
+                            <div class="text-muted">
+                                Fallback dimensi (cm) untuk produk tanpa dimensi.
+                            </div>
+                            <div class="content-group" id="dce_dims_content">
+                                <div class="row mt16">
+                                    <label string="Default (P x L x T)" for="dce_default_item_dimensions" class="col-4"/>
+                                    <field name="dce_default_item_dimensions" class="col-6"
+                                           placeholder="10x10x10"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-lg-6 o_setting_box" id="dce_cache_ttl">
+                        <div class="o_setting_right_pane">
+                            <label for="dce_cache_ttl_hours"/>
+                            <div class="text-muted">
+                                Umur cache daftar kurir &amp; area_id sebelum di-query ulang.
+                            </div>
+                            <div class="content-group" id="dce_cache_ttl_content">
+                                <div class="row mt16">
+                                    <label string="TTL (jam)" for="dce_cache_ttl_hours" class="col-4"/>
+                                    <field name="dce_cache_ttl_hours" class="col-6"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </xpath>
+        </field>
+    </record>
+</odoo>
