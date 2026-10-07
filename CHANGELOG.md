@@ -3,6 +3,74 @@
 Module: `delivery_cost_estimator` — perbandingan biaya ongkir multi-kurir
 (Biteship) di dalam Delivery Tracking Dashboard (`stock_picking_delivery_tracking`).
 
+## v16.0.0.7 — 2026-10-05: Perbaikan zona ongkir salah & berat tidak konsisten
+
+### Yang salah sebelumnya
+
+1. **Zona ongkir bisa salah.** `GET /v1/maps/areas` adalah pencarian *kabur*
+   dan tidak pernah mengembalikan field `postal_code` — kode pos hanya ada di
+   token terakhir `name` (`"Gempol, Pasuruan, Jawa Timur. 67155"`). Kode lama
+   mengirim parameter `postal_code` yang diabaikan API dan selalu memakai
+   `areas[0]`, sehingga DO bisa di-quote ke kabupaten yang tidak sesuai.
+2. **Berat tidak sinkron dengan `raja_ongkir`.** DCE memakai
+   `product.weight * product_uom_qty` (80 kg pada DO 2975) sementara
+   `raja_ongkir` memakai `weight_total` (1 kg). Sumber ongkir berbeda untuk
+   DO yang sama.
+3. **`weight_total` manual diabaikan.** Bila `raja_ongkir` terpasang, operator
+   yang sudah mengisi berat parcels secara manual tetap overruled DCE.
+4. **Kurir tanpa tarif hilang diam-diam.** 21 dari 22 kurir aktif mengembalikan
+   HTTP 400 code `40001010`; hanya JNE yang pernah dihitung. Tidak ada
+   peringatan bahwa pilihan kurir diabaikan.
+
+### Perbaikan
+
+- `_dce_area_postal_code()` & `_dce_area_district()`: baca kode pos dari `name`
+  dan district dari `administrative_division_level_3_name`.
+- `_dce_pick_area()` kini menilai kandidat dengan prioritas
+  **kecamatan → kode pos unik**, dan mengembalikan `None` bila kode pos cocok di
+  lebih dari satu area (mis. `57731` = Jaten **dan** Ngargoyoso) atau hanya kota
+  yang cocok. Tidak ada lagi `areas[0]`.
+- `_dce_street_district()` + `_dce_address_query()`: alamat partner diprioritaskan
+  dengan `Kec. <nama>` lalu kode pos, jadi pencarian Biteship jauh lebih presisi.
+- Cache `biteship_area_id` hanya ditulis bila area benar-benar ter-resolve;
+  config origin (jika diisi) tetap menang seperti sebelumnya.
+- Alamat tujuan yang tidak ter-petakan sekarang **menolak estimasi** dengan
+  pesan yang menyebut kode pos/kecamatan yang perlu dilengkapi.
+- `_dce_weight_basis()`: urutan `weight_total` manual → `ceil` jumlah berat
+  produk → minimum 1 kg. Qty memakai `quantity_done` bila sudah diproses.
+- `_dce_scale_items_to_weight()`: rescale **membulatkan ke bawah** supaya total
+  tidak pernah melewati batas kilogram — Biteship membulatkan paket ke atas ke
+  kg penuh, jadi payload 1 gram di atas 2 kg akan meloncat ke harga 3 kg.
+- `_dce_estimate_warnings()`: peringatan bila kurir yang diminta tidak
+  dihitung, dan bila `weight_total` manual berbeda jauh dari hitungan produk.
+  Notifikasi sekarang menampilkan berat, sumber berat, dan jumlah kurir.
+- Move set yang dihitung berat kini disamakan di kedua modul:
+  `move_ids_without_package` (bukan `move_ids`) dan **move yang dibatalkan
+  dilewati**. Sebelum ini DO 3015 masih menjumlahkan 0,35 kg mouse yang sudah
+  di-cancel, dan move dalam paket ikut terhitung dua kali. Tanpa ini kedua tab
+  bisa tetap berbeda walau aturannya sama.
+- `raja_ongkir/models/stock.py`: `_auto_weight_from_moves()` memakai
+  `quantity_done or product_uom_qty` agar tidak lagi 0 kg untuk DO yang belum
+  diproses, dan melewati move berstatus `cancel`.
+- Test: fixture alamat gudang/tujuan dipin, ditambah test area ambigu/kode pos
+  bersama/tebakan kabur dan test `weight_total` yang lebih ringan dari produk.
+  Semua HTTP tetap di-mock.
+
+### Verifikasi
+
+- `agi_test`: `0 failed, 0 error(s) of 106 tests` (DCE 67 + tracking 61).
+- Diverifikasi bahwa log `401`/`timed out` selama test berasal dari simulasi
+  `FakeResponse`, bukan HTTP nyata.
+
+### Catatan di luar lingkup kode
+
+Tarif yang tampil masih mengikuti rate card akun Biteship. Diverifikasi live bahwa
+JNE Reguler dikembalikan `Rp9.000/kg` **sama untuk semua provinsi** (Jawa, Bali,
+Sulawesi, Papua) dan JNE Trucking tetap `Rp155.000` pada 1 kg, sementara
+RajaOngkir/Komerce menunjukkan tarif per zona yang berbeda. Untuk harga
+resmi JNE per kota, rate card akun Biteship harus dikonfirmasi/diaktifkan dari
+sisi Biteship.
+
 ## v16.0.0.6 — 2026-09-24: Hotfix (Pilihan kurir & biaya tidak muncul di form)
 
 ### Perbaikan

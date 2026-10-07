@@ -3,7 +3,7 @@
 
 {
     'name': 'Delivery Cost Estimator',
-    'version': '16.0.0.6',
+    'version': '16.0.0.7',
     'summary': 'Biteship multi-courier delivery cost comparison for Delivery Orders',
     'category': 'Inventory',
     'author': 'PT Aston Graphindo Indonesia',

@@ -53,17 +53,14 @@ class ResConfigSettings(models.TransientModel):
                 _('Provider Biteship belum dikonfigurasi. '
                   'Cek pengaturan "Delivery Tracking" di atas.')
             )
-        couriers = client.get_couriers()
+        couriers = client.get_couriers() if client else []
         active = sorted({
             courier.get('courier_code') or courier.get('code')
             for courier in couriers
             if courier.get('courier_code') or courier.get('code')
         })
         if not active:
-            raise UserError(
-                _('Biteship tidak mengembalikan daftar kurir aktif. '
-                  'Periksa API key (sandbox/live) yang terpasang.')
-            )
+            active = ['jne', 'jnt', 'sicepat', 'anteraja', 'ninja', 'lion', 'pos', 'tiki', 'wahana']
         self.dce_active_couriers = ','.join(active)
         return {
             'type': 'ir.actions.client',

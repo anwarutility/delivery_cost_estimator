@@ -28,6 +28,30 @@ DEFAULT_DIMS = "delivery_cost_estimator.default_item_dimensions"
 
 RATES = CLIENT_PATH + ".get_rates"
 
+ORIGIN_ZIP = "57731"
+DEST_ZIP = "12345"
+
+
+def area(area_id, district, city, province, postal, level_3=None):
+    """Build a Biteship ``/v1/maps/areas`` row.
+
+    Mirrors the real payload: the postal code only appears as the trailing
+    token of ``name`` and there is no ``postal_code`` field.
+    """
+    return {
+        "id": area_id,
+        "name": "%s, %s, %s. %s" % (district, city, province, postal),
+        "country_name": "Indonesia",
+        "country_code": "ID",
+        "administrative_division_level_1_name": province,
+        "administrative_division_level_1_type": "province",
+        "administrative_division_level_2_name": city,
+        "administrative_division_level_2_type": "city",
+        "administrative_division_level_3_name": level_3 or district,
+        "administrative_division_level_3_type": "district",
+    }
+
+
 PRICING_OK = [
     {
         "courier_name": "JNE",
@@ -81,6 +105,28 @@ class TestDeliveryCostEstimatorHelpers(TransactionCase):
                 "list_price": 50000,
             }
         )
+        # Pin the warehouse address so origin resolution is deterministic.
+        warehouse = cls.env["stock.warehouse"].search([], limit=1)
+        cls.origin_partner = warehouse.partner_id
+        cls.origin_partner.write(
+            {
+                "street": "Jl. Songgorunggi RT 002, Dagen, Kec. Jaten",
+                "city": "Karanganyar",
+                "zip": ORIGIN_ZIP,
+            }
+        )
+
+    def _origin_areas(self):
+        return [
+            area("ORIG-OTHER", "Ngargoyoso", "Karanganyar", "Jawa Tengah", ORIGIN_ZIP),
+            area("ORIG-X", "Jaten", "Karanganyar", "Jawa Tengah", ORIGIN_ZIP),
+        ]
+
+    def _dest_areas(self):
+        return [
+            area("DEST-OTHER", "Panggungrejo", "Pasuruan", "Jawa Timur", "67111"),
+            area("DEST-1", "Gempol", "Pasuruan", "Jawa Timur", DEST_ZIP),
+        ]
 
     def _make_picking(self, with_move=True):
         picking = self.Picking.create(
@@ -137,6 +183,146 @@ class TestDeliveryCostEstimatorHelpers(TransactionCase):
             self.Picking._dce_default_dimensions(), (10, 10, 10)
         )
 
+    # ---- weight basis ----
+    def test_weight_basis_uses_reserved_qty_when_not_done(self):
+        """A reserved but unprocessed bulk line must not count as 0 kg."""
+        picking = self._make_picking()  # 2 kg x 3, quantity_done = 0
+        billable_kg, source, product_kg = picking._dce_weight_basis()
+        self.assertEqual(source, "product")
+        self.assertEqual(product_kg, 6.0)
+        self.assertEqual(billable_kg, 6)
+
+    def test_weight_basis_rounds_up_to_whole_kilograms(self):
+        self.product.write({"weight": 0.5})
+        picking = self._make_picking()  # 0.5 kg x 3 = 1.5 kg -> 2 kg
+        billable_kg, _source, product_kg = picking._dce_weight_basis()
+        self.assertEqual(product_kg, 1.5)
+        self.assertEqual(billable_kg, 2)
+        total = sum(
+            i["weight"] * i["quantity"] for i in picking._build_delivery_items()
+        )
+        # Rounded down on purpose: Biteship rounds the parcel up to whole
+        # kilograms, so staying under 2 kg still prices as 2 kg.
+        self.assertLessEqual(total, 2000)
+        self.assertGreater(total, 1900)
+
+    def test_cancelled_moves_do_not_add_weight(self):
+        """A released line no longer ships, so it must not inflate the quote."""
+        self.product.write({"weight": 2.0})
+        picking = self._make_picking()  # 2 kg x 3 = 6 kg
+        extra = self.env["stock.move"].create(
+            {
+                "name": "released line",
+                "product_id": self.product.id,
+                "product_uom_qty": 5,
+                "product_uom": self.product.uom_id.id,
+                "picking_id": picking.id,
+                "location_id": self.env.ref(
+                    "stock.stock_location_customers"
+                ).id,
+                "location_dest_id": self.env.ref(
+                    "stock.stock_location_suppliers"
+                ).id,
+                "state": "cancel",
+            }
+        )
+        self.assertIn(extra, picking.move_ids)
+        self.assertNotIn(extra, picking._dce_weight_moves())
+        self.assertEqual(picking._dce_product_weight_kg(), 6.0)
+        self.assertEqual(picking._dce_weight_basis()[0], 6)
+        total = sum(
+            i["weight"] * i["quantity"] for i in picking._build_delivery_items()
+        )
+        self.assertLessEqual(total, 6000)
+
+    def test_scaled_items_never_exceed_the_target_weight(self):
+        """One gram over a kg boundary would jump a whole price bracket."""
+        items = [{"name": "x", "quantity": 3.0, "weight": 500}]
+        self.Picking._dce_scale_items_to_weight(items, 2000)
+        self.assertLessEqual(
+            sum(i["weight"] * i["quantity"] for i in items), 2000
+        )
+
+    def test_weight_basis_weight_total_field_wins(self):
+        picking = self._make_picking()
+        if "weight_total" not in picking._fields:
+            self.skipTest("raja_ongkir not installed")
+        picking.write({"weight_total": 12})
+        billable_kg, source, product_kg = picking._dce_weight_basis()
+        self.assertEqual(source, "weight_total")
+        self.assertEqual(billable_kg, 12)
+        self.assertEqual(product_kg, 6.0)
+        total = sum(
+            i["weight"] * i["quantity"] for i in picking._build_delivery_items()
+        )
+        self.assertLessEqual(total, 12000)
+        self.assertGreater(total, 11000)
+
+    def test_weight_total_can_lower_a_heavier_product(self):
+        """A hand-entered parcel weight smaller than the products must apply."""
+        picking = self._make_picking()
+        if "weight_total" not in picking._fields:
+            self.skipTest("raja_ongkir not installed")
+        picking.write({"weight_total": 1})
+        total = sum(
+            i["weight"] * i["quantity"] for i in picking._build_delivery_items()
+        )
+        self.assertLessEqual(total, 1000)
+        self.assertGreater(total, 900)
+
+    def test_build_items_weightless_products_get_the_declared_weight(self):
+        self.product.write({"weight": 0.0})
+        picking = self._make_picking()
+        if "weight_total" not in picking._fields:
+            self.skipTest("raja_ongkir not installed")
+        picking.write({"weight_total": 4})
+        total = sum(
+            i["weight"] * i["quantity"] for i in picking._build_delivery_items()
+        )
+        self.assertLessEqual(total, 4000)
+        self.assertGreater(total, 3800)
+
+    def test_quantity_done_overrides_reserved_qty(self):
+        picking = self._make_picking()
+        move = picking.move_ids[0]
+        move.quantity_done = 1  # only one unit really shipped
+        billable_kg, _source, product_kg = picking._dce_weight_basis()
+        self.assertEqual(product_kg, 2.0)
+        self.assertEqual(billable_kg, 2)
+        self.assertEqual(picking._build_delivery_items()[0]["quantity"], 1.0)
+
+    # ---- courier coverage warning ----
+    def test_warns_about_couriers_without_a_rate(self):
+        picking = self._make_picking()
+        lines = self.Picking._parse_pricing(
+            [{"courier_code": "jne", "price": 9000}]
+        )
+        warnings = picking._dce_estimate_warnings(
+            ["jne", "jnt", "sicepat"], lines
+        )
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("jnt", warnings[0])
+        self.assertIn("sicepat", warnings[0])
+
+    def test_no_courier_warning_when_all_quoted(self):
+        picking = self._make_picking()
+        lines = self.Picking._parse_pricing(
+            [{"courier_code": "jne", "price": 9000},
+             {"courier_code": "jnt", "price": 8000}]
+        )
+        self.assertEqual(
+            picking._dce_estimate_warnings(["jne", "jnt"], lines), []
+        )
+
+    def test_warns_when_manual_weight_contradicts_products(self):
+        picking = self._make_picking()
+        if "weight_total" not in picking._fields:
+            self.skipTest("raja_ongkir not installed")
+        picking.write({"weight_total": 30})  # products only add up to 6 kg
+        lines = self.Picking._parse_pricing([{"courier_code": "jne", "price": 9000}])
+        warnings = picking._dce_estimate_warnings(["jne"], lines)
+        self.assertTrue(any("30" in w for w in warnings))
+
     # ---- origin area resolution ----
     def test_origin_config_wins(self):
         self.Icp.set_param(ORIGIN_AREA, "ORIG-CONFIG")
@@ -148,26 +334,35 @@ class TestDeliveryCostEstimatorHelpers(TransactionCase):
     def test_origin_resolved_and_persisted(self):
         self.Icp.set_param(ORIGIN_AREA, "")
         picking = self._make_picking()
-        with patch(
-            SEARCH_AREAS,
-            return_value=[{"id": "ORIG-X", "postal_code": "10410"}],
-        ):
-            area = picking._resolve_origin_area_id()
-        self.assertEqual(area, "ORIG-X")
+        with patch(SEARCH_AREAS, return_value=self._origin_areas()):
+            area_id = picking._resolve_origin_area_id()
+        self.assertEqual(area_id, "ORIG-X")
         self.assertEqual(self.Icp.get_param(ORIGIN_AREA), "ORIG-X")
+
+    def test_origin_unmatched_postal_is_not_guessed(self):
+        """A fuzzy hit for the wrong district must not be cached as origin."""
+        self.Icp.set_param(ORIGIN_AREA, "")
+        picking = self._make_picking()
+        unrelated = [
+            area("X-1", "Denpasar Barat", "Denpasar", "Bali", "80111"),
+        ]
+        with patch(SEARCH_AREAS, return_value=unrelated):
+            self.assertIsNone(picking._resolve_origin_area_id())
+        self.assertFalse(self.Icp.get_param(ORIGIN_AREA))
 
     # ---- destination area caching on partner ----
     def test_destination_cached_on_partner(self):
         picking = self._make_picking()
-        with patch(
-            SEARCH_AREAS,
-            return_value=[{"id": "DEST-1", "postal_code": "12345"}],
-        ) as m:
-            self.assertEqual(picking._get_delivery_destination_area_id(), "DEST-1")
+        with patch(SEARCH_AREAS, return_value=self._dest_areas()) as m:
+            self.assertEqual(
+                picking._get_delivery_destination_area_id(), "DEST-1"
+            )
         self.assertEqual(self.partner.biteship_area_id, "DEST-1")
         # second call reuses the partner cache, never hits the network
         with patch(SEARCH_AREAS) as m2:
-            self.assertEqual(picking._get_delivery_destination_area_id(), "DEST-1")
+            self.assertEqual(
+                picking._get_delivery_destination_area_id(), "DEST-1"
+            )
         m2.assert_not_called()
         self.assertEqual(m.call_count, 1)
 
@@ -176,6 +371,75 @@ class TestDeliveryCostEstimatorHelpers(TransactionCase):
         with patch(SEARCH_AREAS, return_value=[]):
             self.assertIsNone(picking._get_delivery_destination_area_id())
         self.assertFalse(self.partner.biteship_area_id)
+
+    def test_destination_city_only_match_is_rejected(self):
+        """No zip and no district -> refuse instead of quoting a random zone."""
+        partner = self.env["res.partner"].create(
+            {
+                "name": "No Zip Customer",
+                "street": "Jl. Raya 1",
+                "city": "Pasuruan",
+            }
+        )
+        picking = self.Picking.create(
+            {
+                "picking_type_id": self.out_type.id,
+                "partner_id": partner.id,
+            }
+        )
+        with patch(SEARCH_AREAS, return_value=self._dest_areas()):
+            self.assertIsNone(picking._get_delivery_destination_area_id())
+        self.assertFalse(partner.biteship_area_id)
+
+    def test_destination_matches_district_without_zip(self):
+        partner = self.env["res.partner"].create(
+            {
+                "name": "Kec Customer",
+                "street": "Jl. Raya Wonoayu No. 26, Kec. Gempol",
+                "city": "Pasuruan",
+            }
+        )
+        picking = self.Picking.create(
+            {
+                "picking_type_id": self.out_type.id,
+                "partner_id": partner.id,
+            }
+        )
+        with patch(SEARCH_AREAS, return_value=self._dest_areas()):
+            self.assertEqual(
+                picking._get_delivery_destination_area_id(), "DEST-1"
+            )
+        self.assertEqual(partner.biteship_area_id, "DEST-1")
+
+    def test_area_postal_code_parsed_from_name(self):
+        row = area("A", "Gempol", "Pasuruan", "Jawa Timur", "67155")
+        self.assertEqual(self.Picking._dce_area_postal_code(row), "67155")
+        self.assertEqual(self.Picking._dce_area_district(row), "Gempol")
+
+    def test_pick_area_rejects_ambiguous_shared_postal(self):
+        """One postal code spanning two districts is not decisive on its own."""
+        rows = [
+            area("S-1", "Jaten", "Karanganyar", "Jawa Tengah", ORIGIN_ZIP),
+            area("S-2", "Ngargoyoso", "Karanganyar", "Jawa Tengah", ORIGIN_ZIP),
+        ]
+        self.assertIsNone(self.Picking._dce_pick_area(rows, ORIGIN_ZIP, ""))
+        self.assertEqual(
+            self.Picking._dce_pick_area(rows, ORIGIN_ZIP, "Ngargoyoso")["id"],
+            "S-2",
+        )
+
+    def test_pick_area_prefers_exact_postal_over_first_row(self):
+        rows = self._dest_areas()
+        self.assertEqual(rows[0]["id"], "DEST-OTHER")
+        picked = self.Picking._dce_pick_area(rows, DEST_ZIP, "")
+        self.assertEqual(picked["id"], "DEST-1")
+
+    def test_pick_area_ignores_rows_without_postal_field(self):
+        """The old code compared ``area['postal_code']``, absent in the API."""
+        rows = [{"id": "A-1", "name": "Gempol, Pasuruan, Jawa Timur. 67155"}]
+        self.assertEqual(
+            self.Picking._dce_pick_area(rows, "67155", "")["id"], "A-1"
+        )
 
     # ---- active couriers TTL caching ----
     def test_active_couriers_fresh_cache_no_fetch(self):
@@ -370,6 +634,10 @@ class TestDeliveryCostActions(TransactionCase):
                 "list_price": 50000,
             }
         )
+        warehouse = cls.env["stock.warehouse"].search([], limit=1)
+        warehouse.partner_id.write(
+            {"city": "Karanganyar", "zip": ORIGIN_ZIP}
+        )
 
     def setUp(self):
         super().setUp()
@@ -383,6 +651,18 @@ class TestDeliveryCostActions(TransactionCase):
         self.Icp.set_param(ACTIVE_COURIERS, "jne,jnt")
         self.Icp.set_param(COURIERS_UPDATED, datetime.now().isoformat())
         self.Icp.set_param(DEFAULT_DIMS, "5x5x5")
+
+    def _origin_areas(self):
+        return [
+            area("ORIG-OTHER", "Ngargoyoso", "Karanganyar", "Jawa Tengah", ORIGIN_ZIP),
+            area("ORIG-X", "Jaten", "Karanganyar", "Jawa Tengah", ORIGIN_ZIP),
+        ]
+
+    def _dest_areas(self):
+        return [
+            area("DEST-OTHER", "Panggungrejo", "Pasuruan", "Jawa Timur", "67111"),
+            area("DEST-1", "Gempol", "Pasuruan", "Jawa Timur", DEST_ZIP),
+        ]
 
     def _make_outgoing(self):
         picking = self.Picking.create(
@@ -403,10 +683,10 @@ class TestDeliveryCostActions(TransactionCase):
 
     def test_action_estimate_success(self):
         picking = self._make_outgoing()
-        self.Icp.set_param(ORIGIN_AREA, "")
+        self.Icp.set_param(ORIGIN_AREA, "ORIG-CONFIG")
         with patch(
             SEARCH_AREAS,
-            return_value=[{"id": "ORIG-X", "postal_code": "12345"}],
+            return_value=self._dest_areas(),
         ), patch(
             RATES,
             return_value={"success": True, "pricing": PRICING_OK},
@@ -426,10 +706,12 @@ class TestDeliveryCostActions(TransactionCase):
 
     def test_action_use_delivery_estimate_marks_selection(self):
         picking = self._make_outgoing()
+        self.Icp.set_param(ORIGIN_AREA, "ORIG-CONFIG")
         with patch(
             SEARCH_AREAS,
-            return_value=[{"id": "ORIG-X", "postal_code": "12345"}],
+            return_value=self._dest_areas(),
         ), patch(
+
             RATES,
             return_value={"success": True, "pricing": PRICING_OK},
         ):
@@ -485,13 +767,56 @@ class TestDeliveryCostActions(TransactionCase):
             with self.assertRaises(UserError) as cm:
                 picking.action_estimate_delivery_cost()
         self.assertIn("tujuan", str(cm.exception))
+        self.assertIn("kode pos", str(cm.exception))
+
+    def test_action_estimate_rejects_wrong_zone_instead_of_guessing(self):
+        """City-only fuzzy hit must not silently price an arbitrary district."""
+        picking = self._make_outgoing()
+        self.Icp.set_param(ORIGIN_AREA, "ORIG-CONFIG")
+        unrelated = [
+            area("Z-1", "Denpasar Barat", "Denpasar", "Bali", "80111"),
+            area("Z-2", "Denpasar Selatan", "Denpasar", "Bali", "80211"),
+        ]
+        with patch(SEARCH_AREAS, return_value=unrelated), patch(
+            RATES
+        ) as rates:
+            with self.assertRaises(UserError) as cm:
+                picking.action_estimate_delivery_cost()
+        rates.assert_not_called()
+        self.assertIn("kode pos", str(cm.exception))
+
+    def test_action_estimate_uses_district_when_zip_is_shared(self):
+        """57731 covers Jaten *and* Ngargoyoso; the district must decide."""
+        picking = self._make_outgoing()
+        self.partner.write(
+            {
+                "street": "Jl. Raya Wonoayu No. 26, Kec. Gempol",
+                "city": "Pasuruan",
+                "zip": "67155",
+            }
+        )
+        self.Icp.set_param(ORIGIN_AREA, "ORIG-CONFIG")
+        shared_zip = [
+            area("Z-A", "Ngargoyoso", "Karanganyar", "Jawa Tengah", "67155"),
+            area("Z-B", "Gempol", "Pasuruan", "Jawa Timur", "67155"),
+        ]
+        with patch(SEARCH_AREAS, return_value=shared_zip), patch(
+            RATES,
+            return_value={"success": True, "pricing": PRICING_OK},
+        ) as rates:
+            picking.action_estimate_delivery_cost()
+        self.assertEqual(self.partner.biteship_area_id, "Z-B")
+        self.assertEqual(
+            rates.call_args[0][1],
+            "Z-B",
+        )
 
     def test_action_estimate_api_error_surfaces_message(self):
         picking = self._make_outgoing()
         self.Icp.set_param(ORIGIN_AREA, "ORIG-CONFIG")
         with patch(
             SEARCH_AREAS,
-            return_value=[{"id": "DEST-1", "postal_code": "12345"}],
+            return_value=self._dest_areas(),
         ), patch(
             RATES,
             return_value={
@@ -510,7 +835,7 @@ class TestDeliveryCostActions(TransactionCase):
         self.Icp.set_param(ORIGIN_AREA, "ORIG-CONFIG")
         with patch(
             SEARCH_AREAS,
-            return_value=[{"id": "DEST-1", "postal_code": "12345"}],
+            return_value=self._dest_areas(),
         ), patch(
             RATES,
             return_value={"success": True, "pricing": []},

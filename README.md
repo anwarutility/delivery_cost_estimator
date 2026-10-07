@@ -25,7 +25,10 @@ tracking / manual).
    - hitung berat & dimensi dari move lines (dimensi fallback dari config),
    - panggil `POST /v1/rates/couriers` → tampilkan tabel diurutkan termurah,
    - beri label **Termurah** / **Tercepat**.
-3. Klik **Gunakan Kurir Ini** pada satu baris → pilihan tersimpan sebagai
+3. Jika alamat tujuan tidak bisa dipetakan **pasti** ke satu area Biteship,
+   proses dihentikan dengan pesan jelas — sistem tidak pernah menebak zona dari
+   pencocokan kabur.
+4. Klik **Gunakan Kurir Ini** pada satu baris → pilihan tersimpan sebagai
    `selected_delivery_estimate_id` dan terlihat lagi setelah reload.
 
 API hanya dipanggil saat tombol ditekan (explicit action), bukan saat view
@@ -66,8 +69,40 @@ kolom `length/width/height` ada dan terisi.
 
 ### 5. Validasi alamat
 
-Tujuan (partner) wajib memiliki **jalan** dan **kota** (zip/state opsional).
-Jika tidak, muncul pesan jelas sebelum API dipanggil.
+Tujuan (partner) wajib memiliki **jalan** dan **kota**. Agar zona ongkir tidak
+salah, sertakan juga salah satu dari:
+
+- **kode pos** (`zip`), atau
+- **kecamatan** di alamat, contoh `Jl. Raya Wonoayu No. 26, Kec. Gempol`.
+
+Kalau keduanya tidak ada dan hanya kota yang cocok, estimasi **dihentikan** dengan
+pesan yang menjelaskan cara melengkapinya — dulu sistem diam-diam memakai
+`areas[0]` dari pencarian kabur Biteship sehingga bisa quoted ke kabupaten yang
+salah.
+
+> Satu kode pos sering menutupi beberapa kecamatan (mis. `57731` = Jaten **dan**
+> Ngargoyoso). Karena itu nama kecamatan lebih diprioritaskan daripada kode pos,
+> dan kode pos yang cocok dengan lebih dari satu area results tetap dianggap
+> ambigu.
+
+### 6. Berat kirim
+
+Berat yang dikirim ke Biteship ditentukan berurutan:
+
+1. `stock.picking.weight_total` bila modul `raja_ongkir` terpasang dan nilainya
+   diisi (>0) — berat manual parcels, **mengalahkan** hitungan produk;
+2. jika tidak, jumlah `product.weight * qty` dari move lines, dibulatkan ke atas
+   ke kilogram penuh (`ceil`), minimal 1 kg.
+
+Move yang sudah di-cancel tidak dihitung, dan yang sudah masuk paket tidak
+terhitung dua kali — aturannya sama persis dengan tab RajaOngkir.
+3. qty per baris memakai `quantity_done` bila sudah diproses, jika belum
+   memakai `product_uom_qty` yang direservasi.
+
+Ketika `weight_total` diisi, bobot per baris item diskalakan proporsional; produk
+tanpa bobot diletakkan pada baris terbanyak. Pembulatan selalu ke **bawah**
+supaya total tidak pernah melewati batas kilogram (Biteship membulatkan paket ke
+kilogram penuh, jadi 1 gram lebih dari 2 kg akan meloncat ke tingkat harga 3 kg).
 
 ## Model
 
@@ -80,14 +115,14 @@ Jika tidak, muncul pesan jelas sebelum API dipanggil.
 
 ## Testing
 
-Suite otomatis (`tests/`, semua HTTP di-mock — 37 test):
+Suite otomatis (`tests/`, semua HTTP di-mock — 67 test):
 
 ```bash
 odoo-bin -d agi_test --stop-after-init --test-enable \
   --test-tags=/delivery_cost_estimator -u delivery_cost_estimator
 ```
 
-Regression (ikutkan modul tracking, 84 test lulus):
+Regression (ikutkan modul tracking, 106 test lulus):
 
 ```bash
 odoo-bin -d agi_test --stop-after-init --test-enable \
@@ -95,9 +130,13 @@ odoo-bin -d agi_test --stop-after-init --test-enable \
   -u delivery_cost_estimator,stock_picking_delivery_tracking
 ```
 
+> Jalankan dari `/tmp`; user `odoo` tidak bisa membaca `/home/oem`.
+
 Cakupan: parsing respons `pricing`, flags termurah/tercepat (termasuk tie),
 persistensi pilihan, cache area & kurir (TTL), item/berat/dimensi (min-weight
-guard), mock kegagalan API (timeout, 4xx, 5xx) dan **anti-bocor API key**
+guard, `weight_total` manual, pembulatan ke bawah), pemilihan area (kecamatan
+lebih diprioritaskan, kode pos bersama ditolak, tebakan kabur ditolak), mock
+kegagalan API (timeout, 4xx, 5xx) dan **anti-bocor API key**
 (401/400 → key tidak muncul di pesan error).
 
 ## Batasan (v1)
