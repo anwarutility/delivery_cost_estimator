@@ -4,7 +4,7 @@
 from odoo import _, fields, models
 from odoo.exceptions import UserError
 
-from odoo.addons.delivery_cost_estimator.models.stock_picking import (
+from odoo.addons.delivery_cost_estimator.models.delivery_cost_estimate_mixin import (
     DCE_ACTIVE_COURIERS,
     DCE_CACHE_TTL,
     DCE_DEFAULT_DIMS,

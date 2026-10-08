@@ -3,6 +3,40 @@
 Module: `delivery_cost_estimator` — perbandingan biaya ongkir multi-kurir
 (Biteship) di dalam Delivery Tracking Dashboard (`stock_picking_delivery_tracking`).
 
+## v16.0.0.8 — 2026-10-08: Refactor ke mixin + kecamatan terstruktur
+
+### Refactor (tanpa perubahan perilaku)
+
+Seluruh plumbing Biteship (provider/auth, resolusi area, daftar kurir aktif,
+berat/dimensi, parsing harga, peringatan) dipindah dari `stock.picking` ke
+abstract model baru **`delivery.cost.estimate.mixin`**:
+
+- `stock_picking.py` menyusut dari 695 → ~110 baris: hanya hook
+  (`_dce_weight_moves`, `_dce_origin_partner`, `_dce_destination_partner`) dan
+  tombolnya.
+- `_dce_collect_rates()` dipakai bersama, sehingga bila kelak ada dokumen lain
+  yang perlu estimasi, logikanya tidak perlu disalin.
+- **Tidak ada perubahan perilaku**: 67 test lama tetap hijau tanpa diubah,
+  kecuali target `patch()` yang dipindah mengikuti lokasi kelas baru.
+
+### Perbaikan
+
+- **Kecamatan terstruktur diprioritaskan.** Resolusi area dulu hanya membaca
+  teks `Kec. ...` dari alamat jalan. Alamat yang menulis "Sumbersari" padahal
+  kecamatannya "Sumber Sari" membuat Biteship tidak menemukan area sama sekali
+  (SO S01473 gagal total). Kini field `res.partner.subdistrict_id` (diisi modul
+  `raja_ongkir`) dipakai lebih dulu, teks alamat hanya fallback.
+- **Hak akses.** Provider Biteship memegang API key dan dibatasi untuk stock
+  manager, dan `ir.config_parameter` hanya admin. Keduanya kini dibaca dengan
+  `sudo()` supaya pengguna non-manager tidak kena AccessError. API key tetap
+  tidak pernah dikirim ke client.
+
+### Catatan
+
+Perubahan ini **tidak** menambah fitur estimasi di Sales Order. Tombol
+"Compute Cost Delivery" di Sales Order berada di modul `raja_ongkir`, yang
+sejak v0.10 mendukung Biteship.
+
 ## v16.0.0.7 — 2026-10-05: Perbaikan zona ongkir salah & berat tidak konsisten
 
 ### Yang salah sebelumnya

@@ -72,8 +72,13 @@ kolom `length/width/height` ada dan terisi.
 Tujuan (partner) wajib memiliki **jalan** dan **kota**. Agar zona ongkir tidak
 salah, sertakan juga salah satu dari:
 
-- **kode pos** (`zip`), atau
-- **kecamatan** di alamat, contoh `Jl. Raya Wonoayu No. 26, Kec. Gempol`.
+- **kecamatan** — diambil dari field terstruktur `subdistrict_id` (diisi modul
+  `raja_ongkir`) bila ada, lalu fallback ke teks `Kec. ...` di alamat; atau
+- **kode pos** (`zip`).
+
+> Kecamatan terstruktur lebih diutamakan daripada parsing alamat jalan: alamat
+> yang menulis "Sumbersari" sementara kecamatannya "Sumber Sari" membuat
+> pencarian Biteship tidak menemukan area sama sekali.
 
 Kalau keduanya tidak ada dan hanya kota yang cocok, estimasi **dihentikan** dengan
 pesan yang menjelaskan cara melengkapinya — dulu sistem diam-diam memakai
@@ -109,6 +114,10 @@ kilogram penuh, jadi 1 gram lebih dari 2 kg akan meloncat ke tingkat harga 3 kg)
 - `delivery.cost.estimate.line` — satu baris penawaran (kurir, layanan, harga,
   durasi; flag `is_selected`/`is_cheapest`/`is_fastest` computed, plus
   `flag_summary` label).
+- `delivery.cost.estimate.mixin` — mesin bersama (provider/auth, resolusi area,
+  kurir aktif, berat/dimensi, parsing harga, peringatan) yang dipakai
+  `stock.picking`; memisahkannya dari model konkret membuat logika ini bisa
+  dipakai ulang tanpa menyalin.
 - `stock.picking.delivery_cost_estimate_ids` (O2M),
   `selected_delivery_estimate_id` (M2O), `delivery_cost_estimated_at`.
 - `res.partner.biteship_area_id` (Char) — cache area tujuan.

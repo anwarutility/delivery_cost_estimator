@@ -16,7 +16,7 @@ from odoo.tests.common import TransactionCase
 
 CLIENT_PATH = (
     "odoo.addons.delivery_cost_estimator."
-    "models.stock_picking.BiteshipRatesClient"
+    "models.delivery_cost_estimate_mixin.BiteshipRatesClient"
 )
 SEARCH_AREAS = CLIENT_PATH + ".search_areas"
 GET_COURIERS = CLIENT_PATH + ".get_couriers"
@@ -491,8 +491,9 @@ class TestDeliveryCostEstimatorHelpers(TransactionCase):
             ]
         )
         with patch(
-            "odoo.addons.delivery_cost_estimator.models.stock_picking."
-            "StockPicking._dce_client",
+            "odoo.addons.delivery_cost_estimator.models."
+            "delivery_cost_estimate_mixin."
+            "DeliveryCostEstimateMixin._dce_client",
             return_value=fake,
         ) as m:
             result = settings.action_dce_refresh_couriers()
