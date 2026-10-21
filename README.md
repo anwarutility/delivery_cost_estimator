@@ -14,6 +14,18 @@ tracking / manual).
   Biteship, tidak nyambung ke invoicing (`delivery.carrier`), dan **tidak ada
   notifikasi Telegram** dari fitur ini.
 
+## Lingkungan & Database
+
+Modul ini dipasang di dua instansi Odoo dengan database yang berbeda:
+
+| Server/Instansi | Database Yang Dipakai |
+|---|---|
+| **AGI** (Production PT Aston Graphindo Indonesia) | `agi` |
+| **ASN** | `based` |
+
+> Saat update/upgrade modul, jalankan pada database sesuai instansi:
+> `-d agi` di server AGI, atau `-d based` di server ASN.
+
 ## Cara Kerja
 
 1. Buka form Delivery Order (DO) dari Delivery Tracking Dashboard, pindah ke
